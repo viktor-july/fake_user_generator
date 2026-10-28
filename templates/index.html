@@ -1,0 +1,442 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SQL Faker</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        :root {
+            color-scheme: light;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        body {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 1rem 3rem;
+            color: #202124;
+            background: #fff;
+        }
+
+        h1 {
+            margin-bottom: 0.35rem;
+        }
+
+        h2 {
+            margin-top: 2rem;
+        }
+
+        .muted {
+            color: #5f6368;
+        }
+
+        .panel {
+            border: 1px solid #dadce0;
+            border-radius: 12px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+
+        form {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: end;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
+        label {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        input,
+        select,
+        button {
+            min-height: 40px;
+            padding: 0.5rem 0.7rem;
+            font: inherit;
+            border: 1px solid #bfc4ca;
+            border-radius: 6px;
+        }
+
+        input,
+        select {
+            max-width: 100%;
+            background: white;
+        }
+
+        button {
+            cursor: pointer;
+            background: #f5f7f9;
+            color: #202124;
+        }
+
+        button.primary {
+            background: #1769aa;
+            color: white;
+            border-color: #1769aa;
+        }
+
+        button:disabled {
+            cursor: wait;
+            opacity: 0.6;
+        }
+
+        .status {
+            margin: 0.8rem 0;
+            line-height: 1.5;
+        }
+
+        .table-container {
+            max-height: 55vh;
+            overflow: auto;
+            border: 1px solid #dadce0;
+            border-radius: 8px;
+            margin-top: 1rem;
+            overscroll-behavior: contain;
+        }
+
+        table {
+            border-collapse: separate;
+            border-spacing: 0;
+            width: 100%;
+            min-width: 950px;
+        }
+
+        th,
+        td {
+            border-right: 1px solid #e0e0e0;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 0.65rem 0.75rem;
+            text-align: left;
+            vertical-align: top;
+            overflow-wrap: anywhere;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #f1f3f4;
+            white-space: nowrap;
+        }
+
+        tbody tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        th:last-child,
+        td:last-child {
+            border-right: 0;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: 0;
+        }
+
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            font: inherit;
+        }
+
+        .empty {
+            padding: 1rem;
+            color: #5f6368;
+        }
+
+        .progress {
+            min-height: 1.5rem;
+        }
+
+        @media (max-width: 700px) {
+            body {
+                margin-top: 1rem;
+                padding: 0 0.65rem 2rem;
+            }
+
+            .panel {
+                padding: 0.75rem;
+            }
+
+            form {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            form label,
+            form input,
+            form select,
+            form button {
+                width: 100%;
+            }
+
+            .table-container {
+                max-height: 50vh;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1>SQL Faker</h1>
+    <p class="muted">
+        Generate deterministic fake users, preview batches, and export large datasets.
+    </p>
+
+    <section class="panel">
+        <h2>Preview users</h2>
+
+        <form id="generate-form" method="post" action="/generate">
+            <label>
+                Locale
+                <select name="locale">
+                    <option value="en_US"
+                        {% if locale|default('en_US') == 'en_US' %}selected{% endif %}>
+                        English (USA)
+                    </option>
+                    <option value="de_DE"
+                        {% if locale|default('en_US') == 'de_DE' %}selected{% endif %}>
+                        Deutsch (Germany)
+                    </option>
+                </select>
+            </label>
+
+            <label>
+                Seed
+                <input
+                    type="number"
+                    name="seed"
+                    value="{{ seed|default(42) }}"
+                    required>
+            </label>
+
+            <label>
+                Batch index
+                <input
+                    type="number"
+                    name="batch_index"
+                    value="{{ batch_index|default(0) }}"
+                    min="0"
+                    required>
+            </label>
+
+            <label>
+                Preview size (1–100)
+                <input
+                    type="number"
+                    name="batch_size"
+                    value="{{ batch_size|default(10) }}"
+                    min="1"
+                    max="100"
+                    required>
+            </label>
+
+            <button class="primary" id="generate-button" type="submit">
+                Generate preview
+            </button>
+
+            <button id="next-batch-button" type="button">
+                Next batch →
+            </button>
+
+            <button id="previous-batch-button" type="button">
+                ← Previous batch
+            </button>
+        </form>
+
+        {% if users is defined %}
+            <p class="status">
+                Batch <strong>{{ batch_index }}</strong>:
+                generated <strong>{{ users|length }}</strong> users.
+                {% if elapsed is defined %}
+                    Generation time:
+                    <strong>{{ "%.4f"|format(elapsed) }} seconds</strong>
+                    {% if elapsed > 0 %}
+                        ({{ (users|length / elapsed)|round|int }} users/sec)
+                    {% endif %}
+                {% endif %}
+            </p>
+
+            {% if users %}
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Full name</th>
+                                <th>Address</th>
+                                <th>Coordinates</th>
+                                <th>Physical</th>
+                                <th>Phone</th>
+                                <th>Email</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for u in users %}
+                                <tr>
+                                    <td>{{ u.batch_position }}</td>
+                                    <td>{{ u.full_name }}</td>
+                                    <td><pre>{{ u.address }}</pre></td>
+                                    <td>
+                                        {{ "%.4f"|format(u.latitude) }},
+                                        {{ "%.4f"|format(u.longitude) }}
+                                    </td>
+                                    <td>{{ u.physical }}</td>
+                                    <td>{{ u.phone }}</td>
+                                    <td>{{ u.email }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">No users were returned for this batch.</p>
+            {% endif %}
+        {% else %}
+            <p class="muted">
+                Choose your settings and select Generate preview to display users.
+            </p>
+        {% endif %}
+    </section>
+
+    <section class="panel">
+        <h2>Large-scale CSV export</h2>
+        <p class="muted">
+            Export from 1 to 1,000,000 users. Export uses the locale and seed
+            selected above, and does not display all exported rows in the table.
+        </p>
+
+        <form id="export-form">
+            <label>
+                Number of users
+                <select name="count">
+                    <option value="100000">100,000</option>
+                    <option value="250000">250,000</option>
+                    <option value="500000">500,000</option>
+                    <option value="1000000">1,000,000</option>
+                </select>
+            </label>
+
+            <button class="primary" id="download-button" type="submit">
+                Generate and download CSV
+            </button>
+        </form>
+
+        <p id="export-status" class="status progress" aria-live="polite"></p>
+    </section>
+
+    <script>
+        const generateForm = document.getElementById("generate-form");
+        const exportForm = document.getElementById("export-form");
+        const generateButton = document.getElementById("generate-button");
+        const nextBatchButton = document.getElementById("next-batch-button");
+        const previousBatchButton = document.getElementById("previous-batch-button");
+        const downloadButton = document.getElementById("download-button");
+        const exportStatus = document.getElementById("export-status");
+
+        function currentBatchIndex() {
+            return Math.max(
+                0,
+                Number(generateForm.elements.batch_index.value || 0)
+            );
+        }
+
+        nextBatchButton.addEventListener("click", () => {
+            generateForm.elements.batch_index.value =
+                currentBatchIndex() + 1;
+            generateForm.requestSubmit();
+        });
+
+        previousBatchButton.addEventListener("click", () => {
+            generateForm.elements.batch_index.value =
+                Math.max(0, currentBatchIndex() - 1);
+            generateForm.requestSubmit();
+        });
+
+        generateForm.addEventListener("submit", () => {
+            generateButton.disabled = true;
+            generateButton.textContent = "Generating...";
+        });
+
+        // Restore the button after returning to this page via browser navigation.
+        window.addEventListener("pageshow", () => {
+            generateButton.disabled = false;
+            generateButton.textContent = "Generate preview";
+        });
+
+        exportForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const locale = generateForm.elements.locale.value;
+            const seed = generateForm.elements.seed.value;
+            const count = exportForm.elements.count.value;
+
+            const params = new URLSearchParams({
+                locale,
+                seed,
+                count
+            });
+
+            const started = performance.now();
+
+            downloadButton.disabled = true;
+            exportStatus.textContent =
+                `Generating ${Number(count).toLocaleString()} users. Please wait...`;
+
+            try {
+                const response = await fetch(`/download.csv?${params}`);
+
+                if (!response.ok) {
+                    let message = `HTTP ${response.status}`;
+
+                    try {
+                        const body = await response.json();
+                        message = body.detail || message;
+                    } catch {
+                        // The server may return plain text rather than JSON.
+                    }
+
+                    throw new Error(message);
+                }
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+
+                link.href = url;
+                link.download = "fake_users.csv";
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+
+                // Give the browser a moment before releasing the object URL.
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+                const seconds = (performance.now() - started) / 1000;
+                const usersPerSecond =
+                    seconds > 0 ? Number(count) / seconds : 0;
+
+                exportStatus.textContent =
+                    `CSV download started: ${Number(count).toLocaleString()} users. ` +
+                    `Request and file preparation time: ${seconds.toFixed(2)} seconds. ` +
+                    `Effective rate: ${Math.round(usersPerSecond).toLocaleString()} users/sec.`;
+            } catch (error) {
+                exportStatus.textContent = `Export failed: ${error.message}`;
+            } finally {
+                downloadButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

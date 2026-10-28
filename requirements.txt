@@ -4,3 +4,4 @@ uvicorn[standard]
 jinja2
 asyncpg
 python-dotenv
+python-multipart

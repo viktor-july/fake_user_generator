@@ -48,7 +48,6 @@ DECLARE
     i integer;
     v_base_index bigint;
 
-    -- Lookup arrays loaded once per batch
     v_street_names text[];
     v_street_suffixes text[];
     v_cities text[];
@@ -62,7 +61,6 @@ DECLARE
     v_eye_colors text[];
     v_hair_colors text[];
 
-    -- Physical attribute distributions
     v_height_mean double precision;
     v_height_stddev double precision;
     v_height_min double precision;
@@ -76,7 +74,6 @@ DECLARE
     v_age_min double precision;
     v_age_max double precision;
 
-    -- Generated values
     v_name text;
     v_title text;
     v_first text;
@@ -116,7 +113,6 @@ BEGIN
         RAISE EXCEPTION 'Invalid start index or batch size';
     END IF;
 
-    -- Load address data once per batch.
     SELECT array_agg(name::text ORDER BY id)
     INTO v_street_names
     FROM public.street_names
@@ -139,7 +135,6 @@ BEGIN
     FROM public.states
     WHERE locale = p_locale;
 
-    -- Load name data once per batch.
     SELECT array_agg(title::text ORDER BY id)
     INTO v_titles
     FROM public.titles
@@ -155,7 +150,6 @@ BEGIN
     FROM public.last_names
     WHERE locale = p_locale;
 
-    -- Load email and phone data once per batch.
     SELECT array_agg(domain::text ORDER BY id)
     INTO v_email_domains
     FROM public.email_domains
@@ -166,7 +160,6 @@ BEGIN
     FROM public.phone_formats
     WHERE locale = p_locale;
 
-    -- Load physical-attribute color data once per batch.
     SELECT array_agg(color::text ORDER BY id)
     INTO v_eye_colors
     FROM public.eye_colors
@@ -177,10 +170,7 @@ BEGIN
     FROM public.hair_colors
     WHERE locale = p_locale;
 
-    /*
-     * Load the height, weight, and age distributions.
-     * FILTER is placed after each aggregate expression.
-     */
+
     SELECT
         (max(mean) FILTER (WHERE attribute = 'height'))::double precision,
         (max(stddev) FILTER (WHERE attribute = 'height'))::double precision,
@@ -205,7 +195,6 @@ BEGIN
       AND gender IS NULL
       AND attribute IN ('height', 'weight', 'age');
 
-    -- Validate required lookup data.
     IF coalesce(cardinality(v_street_names), 0) = 0
        OR coalesce(cardinality(v_street_suffixes), 0) = 0
        OR coalesce(cardinality(v_cities), 0) = 0
@@ -233,13 +222,9 @@ BEGIN
             p_locale;
     END IF;
 
-    -- Generate the requested batch.
     FOR i IN 0 .. p_batch_size - 1 LOOP
         v_base_index := p_start_index::bigint + i;
 
-        ------------------------------------------------------------
-        -- Full name
-        ------------------------------------------------------------
         v_title := '';
         v_first := '';
         v_middle := '';
@@ -277,9 +262,6 @@ BEGIN
 
         v_name := trim(v_title || v_first || v_middle || ' ' || v_last);
 
-        ------------------------------------------------------------
-        -- Address
-        ------------------------------------------------------------
         v_house := seeded_random_int(
             p_seed, v_base_index * 20 + 10, 1, 9999
         );
@@ -353,9 +335,6 @@ BEGIN
                 v_apt || E'\n' || v_postal || ' ' || v_city;
         END IF;
 
-        ------------------------------------------------------------
-        -- Latitude and longitude
-        ------------------------------------------------------------
         v_lat := seeded_latitude(
             p_seed, v_base_index * 20 + 30
         );
@@ -364,9 +343,6 @@ BEGIN
             p_seed, v_base_index * 20 + 31
         );
 
-        ------------------------------------------------------------
-        -- Physical attributes
-        ------------------------------------------------------------
         v_height := seeded_normal(
             p_seed, v_base_index * 20 + 41,
             v_height_mean, v_height_stddev
@@ -412,9 +388,6 @@ BEGIN
             v_hair
         );
 
-        ------------------------------------------------------------
-        -- Phone
-        ------------------------------------------------------------
         v_idx := seeded_offset(
             p_seed, v_base_index * 20 + 50,
             cardinality(v_phone_formats)
@@ -436,9 +409,6 @@ BEGIN
             END IF;
         END LOOP;
 
-        ------------------------------------------------------------
-        -- Email
-        ------------------------------------------------------------
         v_idx := seeded_offset(
             p_seed, v_base_index * 20 + 60,
             cardinality(v_email_domains)
@@ -532,12 +502,10 @@ DECLARE
     v_offset         integer;
     v_use_apartment  boolean;
 BEGIN
-    -- 1. House number
     v_house_number := seeded_random_int(
         p_seed, p_index, 1, 9999
     );
 
-    -- 2. Street name
     SELECT COUNT(*)
     INTO v_count
     FROM public.street_names
@@ -555,7 +523,6 @@ BEGIN
     OFFSET v_offset
     LIMIT 1;
 
-    -- 3. Street suffix
     SELECT COUNT(*)
     INTO v_count
     FROM public.street_suffixes
@@ -573,7 +540,6 @@ BEGIN
     OFFSET v_offset
     LIMIT 1;
 
-    -- 4. Optional apartment (~30% chance)
     v_use_apartment :=
         seeded_random(p_seed, p_index + 3) < 0.30;
 
@@ -599,7 +565,6 @@ BEGIN
         END IF;
     END IF;
 
-    -- 5. City
     SELECT COUNT(*)
     INTO v_count
     FROM public.cities
@@ -617,7 +582,6 @@ BEGIN
     OFFSET v_offset
     LIMIT 1;
 
-    -- 6. State / region
     SELECT COUNT(*)
     INTO v_count
     FROM public.states
@@ -635,7 +599,6 @@ BEGIN
     OFFSET v_offset
     LIMIT 1;
 
-    -- 7. Postal / ZIP code
     IF p_locale = 'en_US' THEN
         v_postal := lpad(
             seeded_random_int(
@@ -654,7 +617,6 @@ BEGIN
         );
     END IF;
 
-    -- 8. Assemble the address
     IF p_locale = 'en_US' THEN
         RETURN trim(
             v_house_number::text || ' ' ||
@@ -701,9 +663,6 @@ DECLARE
     v_first        text;
     v_last         text;
 BEGIN
-    -------------------------------------------------
-    -- 1. Domain
-    -------------------------------------------------
     SELECT COUNT(*) INTO v_count FROM email_domains WHERE locale = p_locale;
     v_offset := seeded_offset(p_seed, p_index, v_count);
     SELECT domain INTO v_domain
@@ -712,11 +671,7 @@ BEGIN
     ORDER BY id
     OFFSET v_offset LIMIT 1;
 
-    -------------------------------------------------
-    -- 2. Local part (before @)
-    -------------------------------------------------
     IF p_full_name IS NOT NULL THEN
-        -- Clean the name and build something like first.last or f.last
         v_name_parts := string_to_array(lower(regexp_replace(p_full_name, '[^a-zA-Z ]', '', 'g')), ' ');
         v_first := v_name_parts[1];
         v_last  := v_name_parts[array_length(v_name_parts, 1)];
@@ -728,11 +683,9 @@ BEGIN
             ELSE        v_local_part := v_first || '_' || v_last;
         END CASE;
     ELSE
-        -- Fallback if no name is provided
         v_local_part := 'user' || seeded_random_int(p_seed, p_index + 1, 1000, 9999)::text;
     END IF;
 
-    -- Add a small random number sometimes for uniqueness
     IF seeded_random(p_seed, p_index + 2) < 0.4 THEN
         v_local_part := v_local_part || seeded_random_int(p_seed, p_index + 3, 1, 99)::text;
     END IF;
@@ -761,11 +714,9 @@ DECLARE
     v_count         integer;
     v_offset        integer;
 BEGIN
-    -- Decide variations
     v_use_title  := seeded_random(p_seed, p_index + 1) < 0.35;
     v_use_middle := seeded_random(p_seed, p_index + 2) < 0.40;
 
-    -- Optional title (still gender-aware if you ever add gendered titles later)
     IF v_use_title THEN
         SELECT COUNT(*) INTO v_count
         FROM titles
@@ -781,7 +732,6 @@ BEGIN
         END IF;
     END IF;
 
-    -- First name (unisex – any name of the locale)
     SELECT COUNT(*) INTO v_count
     FROM first_names
     WHERE locale = p_locale;
@@ -793,7 +743,6 @@ BEGIN
     ORDER BY id
     OFFSET v_offset LIMIT 1;
 
-    -- Optional middle name
     IF v_use_middle THEN
         v_offset := seeded_offset(p_seed, p_index + 5, v_count);
         SELECT name INTO v_middle
@@ -803,7 +752,6 @@ BEGIN
         OFFSET v_offset LIMIT 1;
     END IF;
 
-    -- Last name
     SELECT COUNT(*) INTO v_count FROM last_names WHERE locale = p_locale;
     v_offset := seeded_offset(p_seed, p_index + 6, v_count);
     SELECT name INTO v_last
@@ -863,20 +811,16 @@ DECLARE
     mag  double precision;
     z0   double precision;
 BEGIN
-    -- Two independent uniform numbers
     u1 := seeded_random(p_seed, p_index);
     u2 := seeded_random(p_seed, p_index + 1);
 
-    -- Avoid log(0)
     IF u1 < 1e-10 THEN
         u1 := 1e-10;
     END IF;
 
-    -- Box-Muller
     mag := sqrt(-2.0 * ln(u1));
     z0  := mag * cos(2.0 * pi() * u2);
 
-    -- Scale to desired mean and stddev
     RETURN p_mean + z0 * p_stddev;
 END;
 $$;
@@ -916,7 +860,6 @@ DECLARE
     v_digit         text;
     i               integer;
 BEGIN
-    -- Pick a format for the locale
     SELECT COUNT(*) INTO v_count FROM phone_formats WHERE locale = p_locale;
     v_offset := seeded_offset(p_seed, p_index, v_count);
 
@@ -929,7 +872,6 @@ BEGIN
 
     v_result := v_format;
 
-    -- Replace every # with a deterministic digit
     FOR i IN 1..length(v_result) LOOP
         IF substr(v_result, i, 1) = '#' THEN
             v_digit := seeded_random_int(p_seed, p_index + i, 0, 9)::text;
@@ -980,7 +922,6 @@ DECLARE
     v_count  integer;
     v_offset integer;
 BEGIN
-    -- Retrieve all three distributions in one query.
     SELECT
         MAX(mean)      FILTER (WHERE attribute = 'height'),
         MAX(stddev)    FILTER (WHERE attribute = 'height'),
@@ -1016,7 +957,6 @@ BEGIN
       AND gender IS NULL
       AND attribute IN ('height', 'weight', 'age');
 
-    -- Validate required distribution settings.
     IF v_height_mean IS NULL
        OR v_height_stddev IS NULL
        OR v_height_min IS NULL
@@ -1044,7 +984,6 @@ BEGIN
             'Missing age distribution for locale %', p_locale;
     END IF;
 
-    -- Preserve the existing deterministic numeric offsets.
     v_height := seeded_normal(
         p_seed, p_index + 1, v_height_mean, v_height_stddev
     );
@@ -1066,8 +1005,6 @@ BEGIN
         v_age_min, LEAST(v_age_max, v_age)
     );
 
-    -- Retrieve both ordered colour lists in one query.
-    -- Ordering by id preserves the original OFFSET/LIMIT selection.
     SELECT
         (
             SELECT array_agg(ec.color ORDER BY ec.id)
@@ -1081,7 +1018,6 @@ BEGIN
         )
     INTO v_eye_colors, v_hair_colors;
 
-    -- Validate colour configuration.
     IF COALESCE(cardinality(v_eye_colors), 0) = 0 THEN
         RAISE EXCEPTION
             'No eye colors configured for locale %', p_locale;
@@ -1092,7 +1028,6 @@ BEGIN
             'No hair colors configured for locale %', p_locale;
     END IF;
 
-    -- Preserve the original colour offsets and list ordering.
     v_count := cardinality(v_eye_colors);
     v_offset := seeded_offset(p_seed, p_index + 7, v_count);
     v_eye := v_eye_colors[v_offset + 1];
